@@ -1,0 +1,127 @@
+name: test-selenium-multi-browser-multi-type-dev
+run-name: test-selenium-multi-browser-multi-type-${{ github.event.inputs.browser }}-${{ github.run_number }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      browser:
+        type: choice
+        description: Which browser to test
+        required: true
+        options:
+          - firefox
+          - chrome
+  schedule:
+    - cron: "0 4-5 * * 0" # This workflow runs at 4am for Firefox and 5am for Chrome on Sundays
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    outputs:
+      current-hour: ${{ steps.get-hour.outputs.current-hour }}
+    steps:
+      - name: Get current hour
+        id: get-hour
+        run: echo "::set-output name=current-hour::$(date +'%H')"
+
+  test-firefox:
+    needs: setup
+    if: (github.event_name == 'workflow_dispatch' && github.event.inputs.browser == 'firefox') || (needs.setup.outputs.current-hour == '04')
+    runs-on: ubuntu-latest
+    services:
+      selenium:
+        image: selenium/standalone-firefox
+        options: --shm-size=2gb
+        ports:
+          - 4444:4444
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v3
+        with:
+          python-version: "3.10"
+      - name: Cache pip packages
+        uses: actions/cache@v3
+        id: cache
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: ${{ runner.os }}-pip-
+      - name: Install jq
+        run: sudo apt-get install jq
+      - name: Create and update config.json
+        run: |
+          echo '${{ vars.CONFIG_JSON }}' | jq --arg browser "firefox" '.selenium.browser = $browser' > config.json
+      - name: Install dependencies
+        run: |
+          echo "Upgrading pip..."
+          python -m pip install --upgrade pip
+          echo "Installing requirements..."
+          pip install -r requirements.txt
+      - name: Run flake8 linting
+        run: flake8 . --count --show-source --statistics
+      - name: Run pytest with coverage and generate HTML report
+        env:
+          BROWSER: firefox
+        run: pytest -s --cov=./tests/selenium/test_selenium_pom.py tests/selenium/test_selenium_pom.py -v --html=tests-report.html --capture=sys --cov-report html  --cov-report term
+      - name: Archive coverage report
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: test-report-firefox-${{ github.run_number }}
+          path: |
+            tests-report.html
+            htmlcov/
+            screenshots/
+
+  test-chrome:
+    needs: setup
+    if: (github.event_name == 'workflow_dispatch' && github.event.inputs.browser == 'chrome') || (needs.setup.outputs.current-hour == '05')
+    runs-on: ubuntu-latest
+    services:
+      selenium:
+        image: selenium/standalone-chrome
+        options: --shm-size=2gb
+        ports:
+          - 4444:4444
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v3
+        with:
+          python-version: "3.10"
+      - name: Cache pip packages
+        uses: actions/cache@v3
+        id: cache
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: ${{ runner.os }}-pip-
+      - name: Install jq
+        run: sudo apt-get install jq
+      - name: Create and update config.json
+        run: |
+          echo '${{ vars.CONFIG_JSON }}' | jq --arg browser "chrome" '.selenium.browser = $browser' > config.json
+      - name: Install dependencies
+        run: |
+          echo "Upgrading pip..."
+          python -m pip install --upgrade pip
+          echo "Installing requirements..."
+          pip install -r requirements.txt
+      - name: Run flake8 linting
+        run: flake8 . --count --show-source --statistics
+      - name: Run pytest with coverage and generate HTML report
+        env:
+          BROWSER: chrome
+        run: pytest -s --cov=./tests/selenium/test_selenium_pom.py tests/selenium/test_selenium_pom.py -v --html=tests-report.html --capture=sys --cov-report html  --cov-report term
+      - name: Archive coverage report
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: test-report-chrome-${{ github.run_number }}
+          path: |
+            tests-report.html
+            htmlcov/
+            screenshots/
